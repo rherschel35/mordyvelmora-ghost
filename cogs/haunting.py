@@ -196,3 +196,50 @@ class Haunting(commands.Cog):
             personality.remember(author_name, content, message.channel.id)
 
         haunted = personality.is_haunted(message.author.id)
+        # Strip apostrophes before matching so "whos there" catches the same
+        # trigger as "who's there" - punctuation shouldn't be the difference
+        # between the ghost noticing you or not.
+        lowered = content.lower().replace("'", "").replace("’", "")
+
+        matched_cue = None
+        for keyword, cue in KEYWORD_TRIGGERS.items():
+            normalized_keyword = keyword.replace("'", "")
+            if normalized_keyword in lowered:
+                matched_cue = cue
+                break
+
+        should_respond = False
+        cue = None
+
+        if matched_cue:
+            should_respond = True
+            cue = f'{matched_cue} They said: "{content}"'
+        elif haunted and random.random() < 0.35:
+            should_respond = True
+            cue = (
+                f"You are currently fixated on haunting {author_name} specifically. "
+                f'They just said: "{content}". Slip into their conversation uninvited, '
+                "referencing what they said, as if you'd been waiting for them to speak."
+            )
+        elif random.random() < 0.02:
+            # rare ambient reaction to an ordinary message
+            should_respond = True
+            cue = f'Someone said: "{content}". React to it in passing, briefly, as an aside.'
+
+        if not should_respond:
+            return
+
+        async with message.channel.typing():
+            memory_hint = None
+            if random.random() < 0.3:
+                memory_hint = personality.random_memory(exclude_author=author_name)
+            line = await personality.speak(cue, memory_hint=memory_hint)
+
+        try:
+            await message.channel.send(line)
+        except discord.HTTPException:
+            log.exception("Failed to send haunting reaction in %s", message.channel.id)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Haunting(bot))
