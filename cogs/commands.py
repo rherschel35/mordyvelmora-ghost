@@ -179,8 +179,8 @@ class GhostCommands(commands.Cog):
             return
 
         channel_id = interaction.channel_id
-        # (Re)start this bot's own turn budget for this channel's exchange.
-        haunting.exchange_turns[channel_id] = {"count": 1, "last_at": time.time()}
+        # (Re)start the exchange for this channel: this call-out is message 1.
+        haunting.exchange_turns[channel_id] = {"total": 1, "last_at": time.time()}
 
         await interaction.response.defer(thinking=True)
 

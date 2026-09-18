@@ -27,16 +27,15 @@ OTHER_GHOST_ID_RAW = os.getenv("OTHER_GHOST_ID")
 OTHER_GHOST_ID = int(OTHER_GHOST_ID_RAW) if OTHER_GHOST_ID_RAW and OTHER_GHOST_ID_RAW.isdigit() else None
 OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
 
-# How many times THIS bot will speak in a single /interact exchange before
-# going quiet again, and how long an idle exchange stays "open" before a
-# fresh /interact is needed to restart it.
-EXCHANGE_MAX_TURNS = 3
+# Total messages across BOTH ghosts in a single /interact exchange (the
+# call-out counts as the first one) - e.g. 3 = call out, reply, response,
+# then done. How long an idle exchange stays "open" before a fresh
+# /interact is needed to restart it.
+EXCHANGE_MAX_MESSAGES = 3
 EXCHANGE_TIMEOUT_SECONDS = 300
 
 # Words/phrases that might catch the ghost's attention. Matched as substrings,
-# case-insensitively, against ordinary message content. Deliberately keyed to
-# his actual name rather than "ghost" or "velmora" - those get said too often
-# in normal conversation to be a reliable summon.
+# case-insensitively, against ordinary message content.
 KEYWORD_TRIGGERS = {
     "mordy": "Someone said your actual name. React to being noticed, by name.",
     "haunted": "Someone called this place haunted. Confirm it, unsettlingly.",
@@ -133,19 +132,19 @@ class Haunting(commands.Cog):
 
     async def _maybe_reply_to_other_ghost(self, message: discord.Message):
         """Handle a message from the other ghost bot during an /interact
-        exchange. Stays within this bot's own turn budget for the channel
-        and goes quiet once that's spent or the exchange has gone stale."""
+        exchange. `total` tracks how many messages have been sent so far by
+        EITHER ghost in this exchange (as far as this bot has observed), so
+        the two bots independently converge on the same overall cap without
+        sharing any state directly."""
         channel_id = message.channel.id
         now = time.time()
         state = self.exchange_turns.get(channel_id)
         if state and now - state["last_at"] > EXCHANGE_TIMEOUT_SECONDS:
             state = None  # exchange went stale, treat the next call as fresh
-        if state is None:
-            # Hearing the other ghost speak is itself the start of this
-            # bot's side of the exchange - no local /interact required.
-            state = {"count": 0, "last_at": now}
-        if state["count"] >= EXCHANGE_MAX_TURNS:
-            return
+        total_so_far = state["total"] if state else 0
+        total_after_hearing = total_so_far + 1  # this incoming message counts
+        if total_after_hearing >= EXCHANGE_MAX_MESSAGES:
+            return  # the exchange has run its course
 
         personality = self.bot.get_cog("Personality")
         if not personality:
@@ -168,9 +167,7 @@ class Haunting(commands.Cog):
             log.exception("Failed to send cross-ghost reply in %s", channel_id)
             return
 
-        state["count"] += 1
-        state["last_at"] = time.time()
-        self.exchange_turns[channel_id] = state
+        self.exchange_turns[channel_id] = {"total": total_after_hearing + 1, "last_at": time.time()}
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
