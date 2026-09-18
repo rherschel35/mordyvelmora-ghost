@@ -132,11 +132,15 @@ class Haunting(commands.Cog):
             personality.remember(author_name, content, message.channel.id)
 
         haunted = personality.is_haunted(message.author.id)
-        lowered = content.lower()
+        # Strip apostrophes before matching so "whos there" catches the same
+        # trigger as "who's there" - punctuation shouldn't be the difference
+        # between the ghost noticing you or not.
+        lowered = content.lower().replace("'", "").replace("\u2019", "")
 
         matched_cue = None
         for keyword, cue in KEYWORD_TRIGGERS.items():
-            if keyword in lowered:
+            normalized_keyword = keyword.replace("'", "")
+            if normalized_keyword in lowered:
                 matched_cue = cue
                 break
 
