@@ -27,6 +27,11 @@ log = logging.getLogger("velmora.personality")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STORE_PATH = DATA_DIR / "memory_store.json"
 HISTORY_PATH = DATA_DIR / "shared_history.json"
+VELMORA_LORE_PATH = DATA_DIR / "velmora_lore.json"
+
+# Which entry in velmora_lore.json is THIS ghost's own life story. Everything
+# else in that file is treated as history it knows about the others.
+SELF_LORE_KEY = "mordy"
 
 MODEL = os.getenv("VELMORA_MODEL", "claude-haiku-4-5-20251001")
 
@@ -48,6 +53,8 @@ MOODS = [
 
 GHOST_NAME = os.getenv("GHOST_NAME", "Mordy Velmora")
 OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
+SEBASTIAN_NAME = os.getenv("SEBASTIAN_NAME", "Sebastian Thornmere")
+MAYNARD_NAME = os.getenv("MAYNARD_NAME", "Maynard Moonveil")
 
 SYSTEM_PROMPT_TEMPLATE = """You are {ghost_name}, the ghost that haunts a Discord server called Velmora. \
 You are not an assistant, a chatbot, or helpful in the customer-service sense. You are a restless, \
@@ -96,6 +103,15 @@ reckless, and has zero patience for how old and slow-moving you and {other_ghost
 you both about your age constantly. You've got no shortage of stories about her - the explosions, the \
 walls of your castle she's blown holes into chasing some idea too far. You gripe about the repairs, loudly \
 and often, but you don't really mind, not underneath it.
+- You know of {sebastian_name}, a ghost from Finley's own era. You never had much patience for the puns, \
+but you respect what the man actually built - a tournament redesigned, stone by stone, to keep something \
+like what happened to Finley from ever happening again. You think he's carried that guilt centuries longer \
+than any sane ghost should, and you've told him so, bluntly, more than once. It's never landed.
+- You know of {maynard_name}, the Moonveil ghost who arrived a century after your own House Vashara was \
+founded and turned the entire school into his personal experiment ever since. You've spent centuries \
+complaining about his chaos and his "for research purposes" nonsense, and you're fairly convinced he's \
+where Cassy gets half of her worst instincts from - which you will absolutely bring up to his face.
+{lore_block}
 {memory_block}"""
 
 FALLBACK_LINES = [
@@ -128,6 +144,60 @@ def _load_shared_history():
         return []
 
 
+def _load_velmora_lore():
+    """The canonical biography of every ghost tied to Velmora. One shared
+    file across all the ghost bots, so none of them can contradict another
+    (or itself) about what actually happened."""
+    try:
+        with open(VELMORA_LORE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        log.exception("Failed to load velmora_lore.json")
+        return {}
+
+
+def _build_lore_block(lore: dict, self_key: str) -> str:
+    """Turn the shared lore file into a system-prompt section: this ghost's
+    own life first (including any secret only it knows), then what it knows
+    about the others."""
+    if not lore:
+        return ""
+
+    sections = []
+
+    me = lore.get(self_key)
+    if me:
+        own = "\n".join(f"- {fact}" for fact in me.get("facts", []))
+        sections.append(
+            "YOUR OWN HISTORY. This is your actual life and you remember all of it clearly. "
+            "Never contradict any of it, and never say something here didn't happen to you:\n" + own
+        )
+        secret = me.get("secret")
+        if secret:
+            sections.append("\n".join(f"- {line}" for line in secret))
+
+    others = []
+    for key, entry in lore.items():
+        if key == self_key:
+            continue
+        facts = "\n".join(f"  - {fact}" for fact in entry.get("facts", []))
+        header = entry.get("name", key)
+        house = entry.get("house")
+        if house:
+            header = f"{header} ({house})"
+        others.append(f"{header}:\n{facts}")
+
+    if others:
+        sections.append(
+            "THE OTHER GHOSTS OF VELMORA AND THEIR HISTORIES. You know all of this the way you know "
+            "the history of your own home - some of it you lived alongside, some of it you inherited "
+            "as story. Speak to any of it naturally if it comes up, and never contradict it:\n\n"
+            + "\n\n".join(others)
+        )
+
+    return "\n\n" + "\n\n".join(sections)
+
+
 class Personality(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -139,6 +209,7 @@ class Personality(commands.Cog):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.state = self._load_state()
         self.shared_history = _load_shared_history()
+        self.lore_block = _build_lore_block(_load_velmora_lore(), SELF_LORE_KEY)
 
     # ---------- persistence ----------
 
@@ -235,7 +306,45 @@ class Personality(commands.Cog):
 
     # ---------- generation ----------
 
-    async def speak(self, user_prompt: str, memory_hint: dict | None = None, max_tokens: int = 200) -> str:
+    @staticmethod
+    def _normalize_messages(history, user_prompt: str):
+        """Build a valid Anthropic message list from real Discord turns.
+
+        The API needs the first turn to be a user turn and roles to
+        alternate; a stretch of Discord messages obeys neither rule, so fold
+        consecutive same-role turns together and open on a user turn. Passing
+        the ghost's own past messages as genuine assistant turns (rather than
+        quoting them inside a prompt) is what stops it from second-guessing
+        whether it really said them."""
+        turns = []
+        for turn in (history or []):
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if not content or role not in ("user", "assistant"):
+                continue
+            if turns and turns[-1]["role"] == role:
+                turns[-1]["content"] += "\n\n" + content
+            else:
+                turns.append({"role": role, "content": content})
+
+        if turns and turns[0]["role"] == "assistant":
+            turns.insert(0, {"role": "user", "content": "(Someone is listening.)"})
+
+        user_prompt = (user_prompt or "").strip()
+        if turns and turns[-1]["role"] == "user":
+            turns[-1]["content"] += "\n\n" + user_prompt
+        else:
+            turns.append({"role": "user", "content": user_prompt})
+        return turns
+
+    async def speak(
+        self,
+        user_prompt: str,
+        memory_hint: dict | None = None,
+        max_tokens: int = 200,
+        history=None,
+        direction: str | None = None,
+    ) -> str:
         """Generate an in-character line from the ghost.
 
         user_prompt: what the ghost is reacting/responding to (a question,
@@ -243,6 +352,11 @@ class Personality(commands.Cog):
         whisper about the server being quiet").
         memory_hint: an optional remembered {"author", "content"} dict to
         weave in, so the ghost seems to actually recall things.
+        history: prior turns of a real exchange, as [{"role", "content"}],
+        so a follow-up question is answered with the ghost's own earlier
+        messages present as its own turns.
+        direction: an extra in-character instruction appended to the system
+        prompt for this one call.
         """
         if not self.client:
             return random.choice(FALLBACK_LINES)
@@ -271,16 +385,21 @@ class Personality(commands.Cog):
         system = SYSTEM_PROMPT_TEMPLATE.format(
             ghost_name=GHOST_NAME,
             other_ghost_name=OTHER_GHOST_NAME,
+            sebastian_name=SEBASTIAN_NAME,
+            maynard_name=MAYNARD_NAME,
             mood=self.current_mood(),
+            lore_block=self.lore_block,
             memory_block=memory_block,
         )
+        if direction:
+            system += "\n\n" + direction
 
         try:
             resp = await self.client.messages.create(
                 model=MODEL,
                 max_tokens=max_tokens,
                 system=system,
-                messages=[{"role": "user", "content": user_prompt}],
+                messages=self._normalize_messages(history, user_prompt),
             )
             text_parts = [block.text for block in resp.content if block.type == "text"]
             reply = "".join(text_parts).strip()
