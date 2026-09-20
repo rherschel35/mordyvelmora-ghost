@@ -1,7 +1,7 @@
 """
 The Velmora Ghost — a Discord bot that plays a restless spirit haunting
-the server. Entry point: wires up the client, loads cogs, and starts the
-background whisper loop.
+the server. Entry point: wires up the client and loads cogs. He only ever
+speaks in response to someone; he never starts a conversation on his own.
 """
 
 import asyncio
@@ -100,9 +100,6 @@ async def on_ready():
         activity=discord.Activity(type=discord.ActivityType.watching, name=f"the halls of Velmora as {ghost_name}")
     )
 
-    haunting_cog = bot.get_cog("Haunting")
-    if haunting_cog:
-        haunting_cog.start_whisper_loop()
 
 
 async def main():
