@@ -83,12 +83,27 @@ INTERACT_MARKER = "​"
 KEYWORD_TRIGGERS = {
     "mordy": "Someone said your actual name. React to being noticed, by name.",
     "haunted": "Someone called this place haunted. Confirm it, unsettlingly.",
-    "afraid": "Someone admitted fear. Respond to that, your way.",
-    "scared": "Someone admitted fear. Respond to that, your way.",
-    "dead": "Someone mentioned death, lightly or not. React in character.",
-    "who's there": "Someone asked who's there. Answer, obliquely.",
-    "leave me alone": "Someone told something to leave them alone. Respond as the ghost who will not.",
+    "dead": (
+        "Someone said 'dead'. You've been dead for centuries, so react with dry, sarcastic, world-weary "
+        "wit - one short line, like an expert being condescended to by amateurs. BUT if they're talking "
+        "about a real death or a real loss - a person, a pet, grief - drop the sarcasm entirely and be "
+        "quietly, gruffly kind instead."
+    ),
 }
+
+# Whole-word matching only, so "haunted" doesn't fire inside other words and
+# a name only counts when it's actually the name. Apostrophes are ignored.
+_KEYWORD_PATTERNS = {
+    kw: re.compile(r"\b" + re.escape(kw.replace("'", "")) + r"\b") for kw in KEYWORD_TRIGGERS
+}
+
+
+def match_keyword(content: str):
+    lowered = (content or "").lower().replace("'", "").replace("\u2019", "")
+    for keyword, cue in KEYWORD_TRIGGERS.items():
+        if _KEYWORD_PATTERNS[keyword].search(lowered):
+            return cue
+    return None
 
 
 class Haunting(commands.Cog):
@@ -291,12 +306,7 @@ class Haunting(commands.Cog):
         # between the ghost noticing you or not.
         lowered = content.lower().replace("'", "").replace("’", "")
 
-        matched_cue = None
-        for keyword, cue in KEYWORD_TRIGGERS.items():
-            normalized_keyword = keyword.replace("'", "")
-            if normalized_keyword in lowered:
-                matched_cue = cue
-                break
+        matched_cue = match_keyword(content)
 
         should_respond = False
         cue = None
@@ -311,7 +321,7 @@ class Haunting(commands.Cog):
                 f'They just said: "{content}". Slip into their conversation uninvited, '
                 "referencing what they said, as if you'd been waiting for them to speak."
             )
-        elif random.random() < 0.02:
+        elif random.random() < 0.01:
             # rare ambient reaction to an ordinary message
             should_respond = True
             cue = f'Someone said: "{content}". React to it in passing, briefly, as an aside.'
