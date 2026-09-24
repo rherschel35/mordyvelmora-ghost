@@ -1,8 +1,7 @@
 """
-Maynard Moonveil - founder of House Moonveil, the castle's most gleeful agent of chaos,
-and the ghost who designed the tournament. Entry point: wires up the client
-and loads cogs. He only ever speaks in response to someone, and he never
-talks to the other ghosts.
+The Velmora Ghost — a Discord bot that plays a restless spirit haunting
+the server. Entry point: wires up the client and loads cogs. He only ever
+speaks in response to someone; he never starts a conversation on his own.
 """
 
 import asyncio
@@ -19,14 +18,16 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-log = logging.getLogger("moonveil")
+log = logging.getLogger("velmora")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")
+DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")  # optional, for instant slash-command sync while testing
 
 
 def _parse_guild_ids(env_value: str | None):
-    """Comma-separated list of server IDs this ghost is allowed to be in."""
+    """Comma-separated list of server IDs this ghost is allowed to be in.
+    If unset, no restriction is applied (not recommended for a bot with a
+    live token floating around)."""
     if not env_value:
         return None
     ids = set()
@@ -43,7 +44,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!moonveil-unused-", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix="!ghost-unused-", intents=intents, help_command=None)
+
 
 INITIAL_COGS = (
     "cogs.personality",
@@ -53,71 +55,58 @@ INITIAL_COGS = (
 
 
 async def _leave_if_unauthorized(guild: discord.Guild) -> bool:
+    """If this guild isn't on the allowed list, leave immediately and say
+    so in the logs. Returns True if the ghost left."""
     if ALLOWED_GUILD_IDS and guild.id not in ALLOWED_GUILD_IDS:
-        log.warning("Not authorized for guild %r (id=%s) - leaving immediately.", guild.name, guild.id)
+        log.warning(
+            "Not authorized for guild %r (id=%s) - leaving immediately.", guild.name, guild.id
+        )
         await guild.leave()
         return True
     return False
 
 
-_synced = False
-
-
-async def sync_commands():
-    """Register slash commands straight to Velmora so they appear at once,
-    rather than globally, where new commands can take a long while to show
-    up in people's apps. Global copies are cleared so nothing appears twice.
-    Runs once per start - on_ready fires again after every reconnect."""
-    global _synced
-    if _synced:
-        return
-    _synced = True
-
-    targets = set(ALLOWED_GUILD_IDS or ())
-    if DEV_GUILD_ID:
-        targets.add(int(DEV_GUILD_ID))
-
-    if not targets:
-        synced = await bot.tree.sync()
-        log.info("Synced %d global commands (no server set)", len(synced))
-        return
-
-    for guild_id in targets:
-        guild = discord.Object(id=guild_id)
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        log.info("Synced %d commands to server %s", len(synced), guild_id)
-
-    bot.tree.clear_commands(guild=None)
-    await bot.tree.sync()
-
-
 @bot.event
 async def on_guild_join(guild: discord.Guild):
+    """Someone tried to add this ghost to a server it doesn't belong in.
+    Leave right away - it should only ever live in Velmora."""
     await _leave_if_unauthorized(guild)
 
 
 @bot.event
 async def on_ready():
-    log.info("Maynard has arrived. Logged in as %s (id=%s)", bot.user, bot.user.id)
+    log.info("The ghost has arrived. Logged in as %s (id=%s)", bot.user, bot.user.id)
 
+    # Catch any unauthorized guild it's already sitting in too - covers a
+    # stale invite link used before ALLOWED_GUILD_IDS was set, or Public
+    # Bot getting flipped back on by accident.
     for guild in list(bot.guilds):
         await _leave_if_unauthorized(guild)
 
     try:
-        await sync_commands()
+        if DEV_GUILD_ID:
+            guild = discord.Object(id=int(DEV_GUILD_ID))
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            log.info("Synced %d commands to dev guild %s", len(synced), DEV_GUILD_ID)
+        else:
+            synced = await bot.tree.sync()
+            log.info("Synced %d global commands", len(synced))
     except Exception:
         log.exception("Slash command sync failed")
 
+    ghost_name = os.getenv("GHOST_NAME", "Mordy Velmora")
     await bot.change_presence(
-        activity=discord.Activity(type=discord.ActivityType.watching,
-                                  name="the students, for research purposes")
+        activity=discord.Activity(type=discord.ActivityType.watching, name=f"the halls of Velmora as {ghost_name}")
     )
+
 
 
 async def main():
     if not DISCORD_TOKEN:
-        raise SystemExit("DISCORD_TOKEN is not set. Copy .env.example to .env and fill it in.")
+        raise SystemExit(
+            "DISCORD_TOKEN is not set. Copy .env.example to .env and fill it in."
+        )
 
     async with bot:
         for cog in INITIAL_COGS:
