@@ -73,7 +73,7 @@ EXCHANGE_TIMEOUT_SECONDS = 300
 # A trailing zero-width space, invisible in Discord, appended to every
 # message that's genuinely part of an /interact exchange (both the call-out
 # and every reply). Without this, the other bot's on_message can't tell a
-# deliberate call-out apart from an ordinary whisper or keyword reaction it
+# deliberate call-out apart from an ordinary aside or keyword reaction it
 # happened to send - and would end up "replying" to those too. Must match
 # the constant of the same name in cogs/commands.py.
 INTERACT_MARKER = "​"
@@ -280,8 +280,7 @@ class Haunting(commands.Cog):
         if not personality:
             return
 
-        # Mood used to drift inside the whisper loop. With that gone, nudge it
-        # here instead - it self-throttles to roughly one shift every 2 hours.
+        # Drift the mood as people talk. Shifts wait about two hours.
         personality.maybe_shift_mood()
 
         content = message.content or ""
