@@ -2,11 +2,11 @@
 
 A Discord bot that plays Mordy Velmora, a restless spirit haunting the
 server "Velmora." It speaks in character via the Claude API (dynamic, not
-canned lines), drops unprompted whispers, reacts to keywords, remembers
-things members say and brings them up later, and answers direct questions
-through `/seance`. It can also fixate on a member for a while with `/haunt`,
-and slowly reveals Velmora's backstory (including its own name) through
-lore drops.
+canned lines) when someone has spoken — keyword reactions, replies and
+mentions, and the occasional aside — remembers things members say and
+brings them up later, and answers direct questions through `/seance`. It
+can also fixate on a member for a while with `/haunt`, and slowly reveals
+Velmora's backstory (including its own name) through lore drops.
 
 The name is configurable via `GHOST_NAME` in `.env` if you ever want to
 rename it — it's woven into the system prompt, the bot's Discord presence,
@@ -38,10 +38,10 @@ the first time).
 ## Structure
 
 ```
-bot.py                 # entrypoint, client setup, background whisper loop
+bot.py                 # entrypoint and client setup
 cogs/
   personality.py       # Claude API wrapper + ghost voice/mood/memory
-  haunting.py           # passive behaviors: whispers, keyword reactions, memory recall
+  haunting.py           # passive behaviors: keyword reactions, memory recall, haunt asides
   commands.py           # /seance, /haunt, /lore, /mood
 data/
   memory_store.json     # persisted member quotes + mood + haunt targets (runtime-created)
@@ -56,3 +56,4 @@ data/
   canned text, though there are graceful fallback lines if the API call fails.
 - State (mood, memories, haunt targets, lore progress) is persisted to a
   small JSON file in `data/` so it survives restarts.
+- Academy rumors (`/rumor` and the scheduled posts) live in Housecup.
